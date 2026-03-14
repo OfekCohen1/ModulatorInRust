@@ -1,4 +1,6 @@
 mod plotter;
+mod modulator;
+
 use plotter::PlotWrapper;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
