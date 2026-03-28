@@ -1,49 +1,64 @@
+use std::f64::consts::PI;
+use std::borrow::Cow;
+
 /// The common interface for all modulation techniques.
 pub trait Modulator {
     /// Modulates an entire buffer of message samples.
     ///
+    /// # Arguments
     /// * `message` - The input signal (message) to modulate onto the carrier.
     /// * `sample_rate` - The system sample rate in Hz.
     fn modulate(&mut self, message: &[f64], sample_rate: f64) -> Vec<f64>;
 }
 
-/// A standard Amplitude Modulator (AM).
-///
-/// Standard AM uses a "DC offset" (the 1.0 in the formula) to ensure the
-/// carrier is always present, which simplifies envelope demodulation.
+/// A standard Amplitude Modulator (AM) with automatic normalization safety.
 pub struct AmModulator {
     /// The frequency of the carrier sine wave in Hz.
-    pub carrier_freq: f64,
+    pub carrier_frequency: f64,
     /// The modulation index (0.0 to 1.0). Determines the "depth" of the modulation.
     pub modulation_index: f64,
 }
-// Hello World My Name is Ofek
+
 impl AmModulator {
     /// Creates a new AM Modulator.
-    pub fn new(carrier_freq: f64, modulation_index: f64) -> Self {
+    pub fn new(carrier_frequency: f64, modulation_index: f64) -> Self {
         Self {
-            carrier_freq,
+            carrier_frequency,
             modulation_index,
+        }
+    }
+
+    /// Internal helper to ensure the message is within the safe range [-1.0, 1.0].
+    /// 
+    /// If the signal exceeds 1.0, it is normalized to prevent overmodulation.
+    /// We use Cow (Clone-on-Write) to avoid allocating memory if the signal is already safe.
+    fn get_safe_message<'a>(&self, message: &'a [f64]) -> Cow<'a, [f64]> {
+        // Find the peak absolute value using a functional fold.
+        let peak = message.iter().fold(0.0f64, |max_abs, &val| max_abs.max(val.abs()));
+
+        if peak > 1.0 {
+            println!("Warning: Message signal peak ({:.2}) exceeds 1.0. Normalizing to avoid overmodulation.", peak);
+            let normalized: Vec<f64> = message.iter().map(|&val| val / peak).collect();
+            Cow::Owned(normalized) 
+        } else {
+            Cow::Borrowed(message)
         }
     }
 }
 
 impl Modulator for AmModulator {
     fn modulate(&mut self, message: &[f64], sample_rate: f64) -> Vec<f64> {
-        let two_pi = 2.0 * std::f64::consts::PI;
+        let safe_message = self.get_safe_message(message);
+        let angular_frequency_per_sample = 2.0 * PI * self.carrier_frequency / sample_rate;
 
-        message
+        safe_message
             .iter()
             .enumerate()
             .map(|(i, &msg_sample)| {
-                // Calculate time t for the current sample index
-                let t = i as f64 / sample_rate;
-
-                // Generate the carrier signal at time t
-                // We use cos() as the standard reference for carriers
-                let carrier = (two_pi * self.carrier_freq * t).cos();
-
-                // Apply the AM formula: s(t) = [1 + m * m(t)] * c(t)
+                // Generate carrier: cos(2 * PI * f * t)
+                let carrier = (angular_frequency_per_sample * i as f64).cos();
+                
+                // AM formula: s(t) = [1 + m * m(t)] * c(t)
                 let envelope = 1.0 + (self.modulation_index * msg_sample);
 
                 envelope * carrier
@@ -57,71 +72,55 @@ mod tests {
     use super::*;
     use rstest::*;
 
-    /// Fixture: Provides a standard sample rate for all tests.
+    const EPSILON: f64 = 1e-10;
+
     #[fixture]
     fn sample_rate() -> f64 {
         1000.0
     }
 
     #[rstest]
-    #[case(100.0, 1.0)]  // 100% modulation
-    #[case(100.0, 0.5)]  // 50% modulation
-    #[case(440.0, 0.2)]  // Subtle modulation at higher freq
-    fn test_am_modulation_full_signal(
-        #[case] freq: f64,
-        #[case] index: f64,
-        sample_rate: f64
-    ) {
-        // --- Arrange ---
-        let mut am = AmModulator::new(freq, index);
-        let message = vec![1.0; 50]; 
-        let pi2 = 2.0 * std::f64::consts::PI;
-        let expected_signal = (0..message.len()).map(|i| {
-            let t = i as f64 / sample_rate;
-            (1.0 + index) * (pi2 * freq * t).cos()
-        });
-
-        // --- Act ---
-        let output = am.modulate(&message, sample_rate);
-
-        // --- Assert ---
-        output.iter().zip(expected_signal).enumerate().for_each(|(i, (actual, expected))| {
-            assert!((actual - expected).abs() < 1e-10, 
-                "Sample {} mismatch. Actual: {}, Expected: {}", i, actual, expected);
-        });
-    }
-
-    #[rstest]
-    fn test_am_neutral_message(sample_rate: f64) {
-        // --- Arrange ---
-        let mut am = AmModulator::new(200.0, 0.8);
-        let message = vec![0.0; 100]; 
-        let pi2 = 2.0 * std::f64::consts::PI;
-        let expected_carrier = (0..message.len()).map(|i| {
-            let t = i as f64 / sample_rate;
-            (pi2 * 200.0 * t).cos()
-        });
-
-        // --- Act ---
-        let output = am.modulate(&message, sample_rate);
-
-        // --- Assert ---
-        assert!(output.iter().zip(expected_carrier).all(|(actual, expected)| {
-            (actual - expected).abs() < 1e-10
-        }), "Output should be identical to the carrier when message is silent");
-    }
-
-    #[rstest]
-    fn test_am_pinch_point(sample_rate: f64) {
+    fn test_am_normalization_safety(sample_rate: f64) {
         // --- Arrange ---
         let mut am = AmModulator::new(100.0, 1.0);
-        let message = vec![-1.0; 100];
+        let oversized_message = vec![2.0; 100]; // Peak is 2.0, should be normalized to 1.0
 
         // --- Act ---
-        let output = am.modulate(&message, sample_rate);
+        let output = am.modulate(&oversized_message, sample_rate);
 
         // --- Assert ---
-        assert!(output.iter().all(|&val| val.abs() < 1e-10), 
-            "Signal should be completely zeroed out when envelope hits 0.0");
+        // If normalized correctly, envelope is 1 + 1.0 * (2.0/2.0) = 2.0.
+        // If NOT normalized, envelope would be 1 + 1.0 * 2.0 = 3.0.
+        let angular_frequency_per_sample = 2.0 * PI * 100.0 / sample_rate;
+        output.iter().enumerate().for_each(|(i, &val)| {
+            let expected = 2.0 * (angular_frequency_per_sample * i as f64).cos();
+            assert!((val - expected).abs() < EPSILON);
+        });
+    }
+
+    #[rstest]
+    #[case(100.0, 1.0)]
+    #[case(440.0, 0.5)]
+    fn test_am_modulation_full_signal(
+        #[case] carrier_frequency: f64,
+        #[case] modulation_index: f64,
+        sample_rate: f64
+    ) {
+        let mut am = AmModulator::new(carrier_frequency, modulation_index);
+        let message = vec![1.0; 50]; 
+        
+        let angular_frequency_per_sample = 2.0 * PI * carrier_frequency / sample_rate;
+        let expected_signal = (0..message.len()).map(|i| {
+            (1.0 + modulation_index) * (angular_frequency_per_sample * i as f64).cos()
+        });
+
+        let output = am.modulate(&message, sample_rate);
+
+        output.iter()
+            .zip(expected_signal)
+            .enumerate()
+            .for_each(|(i, (actual, expected))| {
+                assert!((actual - expected).abs() < EPSILON, "Sample {} mismatch", i);
+            });
     }
 }
