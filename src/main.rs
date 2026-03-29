@@ -34,18 +34,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut am_modulator = AmModulator::new(CARRIER_FREQUENCY, MODULATION_INDEX);
     let am_signal = am_modulator.modulate(&message_signal, SAMPLE_RATE);
 
-    // 3. Visualization using Subplots (2x1 Grid)
+    // 3. Visualization using Subplots (2x2 Grid)
     println!("Preparing plots...");
-    let mut plot_wrapper = PlotWrapper::new(2, 1);
-    plot_wrapper.set_title("Amplitude Modulation (AM) Demonstration");
+    let mut plot_wrapper = PlotWrapper::new(2, 2);
+    plot_wrapper.set_title("Amplitude Modulation (AM) Time & Frequency Analysis");
 
-    // Plot 1: The Message Signal (Row 1, Col 1)
+    // Row 1, Col 1: The Message Signal (Time Domain)
     plot_wrapper.add_signal(1, 1, "Message (5Hz)", &message_signal, SAMPLE_RATE);
 
-    // Plot 2: The Modulated Signal (Row 2, Col 1)
+    // Row 1, Col 2: Message Frequency Response
+    plot_wrapper.add_frequency_response(1, 2, "Message", &message_signal, SAMPLE_RATE, 2000);
+
+    // Row 2, Col 1: The Modulated Signal (Time Domain)
     plot_wrapper.add_signal(2, 1, "AM Signal (100Hz Carrier)", &am_signal, SAMPLE_RATE);
 
-    // TODO: Next time - Perform AM Coherent Demodulation and add a 3rd plot to the gallery.
+    // Row 2, Col 2: AM Signal Frequency Response
+    plot_wrapper.add_frequency_response(2, 2, "AM Signal", &am_signal, SAMPLE_RATE, 2000);
+
+    // TODO: Next time - Perform AM Coherent Demodulation.
 
     println!("Opening AM demonstration in browser...");
     plot_wrapper.show();

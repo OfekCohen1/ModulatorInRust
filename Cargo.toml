@@ -6,6 +6,8 @@ edition = "2021"
 [dependencies]
 plotly = "0.12.0"
 biquad = "0.4.2"
+realfft = "3.3.0"
+num-complex = "0.4.6"
 
 [dev-dependencies]
 rstest = "0.21"
