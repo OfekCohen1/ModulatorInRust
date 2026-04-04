@@ -9,8 +9,7 @@ pub trait Demodulator {
     ///
     /// # Arguments
     /// * `signal` - The modulated signal to process.
-    /// * `sample_rate` - The system sample rate in Hz.
-    fn demodulate(&mut self, signal: &[f64], sample_rate: f64) -> Vec<f64>;
+    fn demodulate(&mut self, signal: &[f64]) -> Vec<f64>;
 }
 
 /// A Coherent AM Detector with Zero-Phase filtering.
@@ -46,7 +45,7 @@ impl AmCoherentDetector {
 }
 
 impl Demodulator for AmCoherentDetector {
-    fn demodulate(&mut self, signal: &[f64], _sample_rate: f64) -> Vec<f64> {
+    fn demodulate(&mut self, signal: &[f64]) -> Vec<f64> {
         // 1. Mixing: multiply by synchronized local oscillator
         let mut data: Vec<f64> = signal
             .iter()
@@ -113,7 +112,7 @@ mod tests {
             .map(|i| expected_generator(i as f64 / sample_rate))
             .collect();
 
-        let output = demod.demodulate(&input_signal, sample_rate);
+        let output = demod.demodulate(&input_signal);
 
         output.iter()
             .zip(expected_output.iter())

@@ -1,9 +1,6 @@
-mod demodulator;
-mod modulator;
-mod plotter;
-
-use modulator::{AmModulator, Modulator};
-use plotter::PlotWrapper;
+use modulator_in_rust::modulator::{AmModulator, Modulator};
+use modulator_in_rust::demodulator::{AmCoherentDetector, Demodulator};
+use modulator_in_rust::plotter::{plot_diagnostic_time, plot_diagnostic_fft};
 use std::f64::consts::PI;
 
 /// System-wide constants for the demonstration.
@@ -13,8 +10,16 @@ const MESSAGE_FREQUENCY: f64 = 5.0;
 const CARRIER_FREQUENCY: f64 = 100.0;
 const MODULATION_INDEX: f64 = 0.8;
 
+/// Demodulation constants
+const FILTER_CUTOFF_FREQ: f64 = 15.0;
+
+/// Visualization constants
+/// Choosing 2000 gives us a 0.5Hz resolution (1000/2000), 
+/// which aligns perfectly with our 5Hz message.
+const FFT_SIZE: usize = 2000;
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("Starting AM Modulation Demonstration...");
+    println!("Starting AM Modulation/Demodulation Demonstration...");
     let num_samples = (SAMPLE_RATE * DURATION) as usize;
 
     // 1. Generate the Message Signal (5Hz Sine Wave)
@@ -34,27 +39,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut am_modulator = AmModulator::new(CARRIER_FREQUENCY, MODULATION_INDEX);
     let am_signal = am_modulator.modulate(&message_signal, SAMPLE_RATE);
 
-    // 3. Visualization using Subplots (2x2 Grid)
-    println!("Preparing plots...");
-    let mut plot_wrapper = PlotWrapper::new(2, 2);
-    plot_wrapper.set_title("Amplitude Modulation (AM) Time & Frequency Analysis");
+    // 3. Perform AM Coherent Demodulation
+    println!("Demodulating signal...");
+    let mut detector = AmCoherentDetector::new(CARRIER_FREQUENCY, FILTER_CUTOFF_FREQ, SAMPLE_RATE);
+    let recovered_signal = detector.demodulate(&am_signal);
 
-    // Row 1, Col 1: The Message Signal (Time Domain)
-    plot_wrapper.add_signal(1, 1, "Message (5Hz)", &message_signal, SAMPLE_RATE);
+    // 4. Visualization (Standalone Diagnostic Plots)
+    println!("Displaying diagnostic plots...");
 
-    // Row 1, Col 2: Message Frequency Response
-    plot_wrapper.add_frequency_response(1, 2, "Message", &message_signal, SAMPLE_RATE, 2000);
+    // Stage 1: Message Analysis
+    plot_diagnostic_time("Original Message", &message_signal, SAMPLE_RATE);
+    plot_diagnostic_fft("Original Spectrum", &message_signal, SAMPLE_RATE, FFT_SIZE);
 
-    // Row 2, Col 1: The Modulated Signal (Time Domain)
-    plot_wrapper.add_signal(2, 1, "AM Signal (100Hz Carrier)", &am_signal, SAMPLE_RATE);
+    // Stage 2: AM Signal Analysis
+    plot_diagnostic_time("AM Modulated Signal", &am_signal, SAMPLE_RATE);
+    plot_diagnostic_fft("AM Spectrum", &am_signal, SAMPLE_RATE, FFT_SIZE);
 
-    // Row 2, Col 2: AM Signal Frequency Response
-    plot_wrapper.add_frequency_response(2, 2, "AM Signal", &am_signal, SAMPLE_RATE, 2000);
+    // Stage 3: Recovered Signal Analysis
+    plot_diagnostic_time("Recovered Message", &recovered_signal, SAMPLE_RATE);
+    plot_diagnostic_fft("Recovered Spectrum", &recovered_signal, SAMPLE_RATE, FFT_SIZE);
 
-    // TODO: Next time - Perform AM Coherent Demodulation.
-
-    println!("Opening AM demonstration in browser...");
-    plot_wrapper.show();
+    println!("Demo complete. Standalone plots opened in browser (if diagnostic-plots feature is enabled).");
 
     Ok(())
 }
