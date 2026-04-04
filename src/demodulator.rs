@@ -21,6 +21,7 @@ pub struct AmCoherentDetector {
     angular_frequency_per_sample: f64,
     /// Pre-calculated filter coefficients.
     filter_coefficients: Coefficients<f64>,
+    sample_rate: f64,
 }
 
 impl AmCoherentDetector {
@@ -37,9 +38,21 @@ impl AmCoherentDetector {
             Q_BUTTERWORTH_F64,
         ).expect("Invalid filter parameters");
 
+        // --- Diagnostic: Visualize the LPF characterization ---
+        #[cfg(feature = "diagnostic-plots")]
+        {
+            let mut impulse = vec![0.0; 1000];
+            impulse[0] = 1.0;
+            // Create a temporary filter instance to measure impulse response
+            let mut measurement_filter = DirectForm2Transposed::<f64>::new(filter_coefficients);
+            let response: Vec<f64> = impulse.into_iter().map(|x| measurement_filter.run(x)).collect();
+            crate::plotter::plot_diagnostic_time_and_fft("Demodulator: LPF Characterization", &response, sample_rate, 2048);
+        }
+
         Self {
             angular_frequency_per_sample,
             filter_coefficients,
+            sample_rate,
         }
     }
 }
@@ -55,22 +68,32 @@ impl Demodulator for AmCoherentDetector {
             })
             .collect();
 
+        // --- Diagnostic: After Mixer ---
+        crate::plotter::plot_diagnostic_time_and_fft("Demodulator: After Mixer", &data, self.sample_rate, 2000);
+
         // 2. Zero-Phase Filtering (filtfilt)
+        // Note: We create fresh filter instances (with zeroed memory) for each pass
+        // to ensure no historical signal leakage.
+        
         // Pass 1: Forward
-        let mut filter = DirectForm2Transposed::<f64>::new(self.filter_coefficients);
+        let mut forward_filter = DirectForm2Transposed::<f64>::new(self.filter_coefficients);
         for sample in data.iter_mut() {
-            *sample = filter.run(*sample);
+            *sample = forward_filter.run(*sample);
         }
 
         // Pass 2: Backward (reverses the phase shift)
         data.reverse();
-        let mut filter = DirectForm2Transposed::<f64>::new(self.filter_coefficients);
+        let mut backward_filter = DirectForm2Transposed::<f64>::new(self.filter_coefficients);
         for sample in data.iter_mut() {
-            *sample = filter.run(*sample);
+            *sample = backward_filter.run(*sample);
         }
 
         // Restore original order
         data.reverse();
+
+        // --- Diagnostic: After LPF ---
+        crate::plotter::plot_diagnostic_time_and_fft("Demodulator: After LPF (Final)", &data, self.sample_rate, 2048);
+
         data
     }
 }

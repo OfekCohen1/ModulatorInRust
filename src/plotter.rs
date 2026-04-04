@@ -3,33 +3,40 @@
 mod imp {
     use plotly::{Plot, Scatter, Layout};
     use plotly::common::Title;
+    use plotly::layout::{LayoutGrid, GridPattern};
     use realfft::RealFftPlanner;
 
-    /// Internal helper to create a standard 1x1 plot layout.
-    fn create_standalone_plot(title: &str) -> Plot {
+    /// Internal helper to create a 2x1 grid plot layout.
+    fn create_diagnostic_plot(title: &str) -> Plot {
         let mut plot = Plot::new();
-        let layout = Layout::new().title(Title::with_text(title));
+        let layout = Layout::new()
+            .title(Title::with_text(title))
+            .grid(
+                LayoutGrid::new()
+                    .rows(2)
+                    .columns(1)
+                    .pattern(GridPattern::Independent),
+            );
         plot.set_layout(layout);
         plot
     }
 
-    pub fn plot_diagnostic_time(name: &str, data: &[f64], sample_rate: f64) {
-        let mut plot = create_standalone_plot(&format!("Diagnostic (Time): {}", name));
-        
+    /// Adds a time-domain trace to the provided plot (Target: Row 1).
+    fn add_time_trace(plot: &mut Plot, name: &str, data: &[f64], sample_rate: f64) {
         let time: Vec<f64> = (0..data.len())
             .map(|i| i as f64 / sample_rate)
             .collect();
 
         let trace = Scatter::new(time, data.to_vec())
-            .name(name);
-
+            .name(format!("{} (Time)", name))
+            .x_axis("x")
+            .y_axis("y");
+        
         plot.add_trace(trace);
-        plot.show();
     }
 
-    pub fn plot_diagnostic_fft(name: &str, data: &[f64], sample_rate: f64, n_fft: usize) {
-        let mut plot = create_standalone_plot(&format!("Diagnostic (FFT): {}", name));
-        
+    /// Adds a frequency-domain trace to the provided plot (Target: Row 2).
+    fn add_fft_trace(plot: &mut Plot, name: &str, data: &[f64], sample_rate: f64, n_fft: usize) {
         let n_original = data.len();
         let n = n_fft.max(n_original);
         
@@ -37,7 +44,6 @@ mod imp {
         let fft_planner = planner.plan_fft_forward(n);
 
         let mut indata = fft_planner.make_input_vec();
-        // fill with zeros and copy original data
         for val in indata.iter_mut() { *val = 0.0; }
         indata[..n_original].copy_from_slice(data);
         
@@ -55,9 +61,19 @@ mod imp {
             .collect();
 
         let trace = Scatter::new(frequencies, magnitudes)
-            .name(format!("{} (Freq)", name));
+            .name(format!("{} (Freq)", name))
+            .x_axis("x2")
+            .y_axis("y2");
 
         plot.add_trace(trace);
+    }
+
+    pub fn plot_diagnostic_time_and_fft(name: &str, data: &[f64], sample_rate: f64, n_fft: usize) {
+        let mut plot = create_diagnostic_plot(&format!("Diagnostic: {}",  name));
+        
+        add_time_trace(&mut plot, name, data, sample_rate);
+        add_fft_trace(&mut plot, name, data, sample_rate, n_fft);
+
         plot.show();
     }
 }
@@ -66,12 +82,7 @@ mod imp {
 #[cfg(not(feature = "diagnostic-plots"))]
 mod imp {
     #[inline(always)]
-    pub fn plot_diagnostic_time(_name: &str, _data: &[f64], _sample_rate: f64) {
-        // Optimized away by the compiler
-    }
-
-    #[inline(always)]
-    pub fn plot_diagnostic_fft(_name: &str, _data: &[f64], _sample_rate: f64, _n_fft: usize) {
+    pub fn plot_diagnostic_time_and_fft(_name: &str, _data: &[f64], _sample_rate: f64, _n_fft: usize) {
         // Optimized away by the compiler
     }
 }

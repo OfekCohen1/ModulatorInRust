@@ -1,6 +1,6 @@
 use modulator_in_rust::modulator::{AmModulator, Modulator};
 use modulator_in_rust::demodulator::{AmCoherentDetector, Demodulator};
-use modulator_in_rust::plotter::{plot_diagnostic_time, plot_diagnostic_fft};
+use modulator_in_rust::plotter::plot_diagnostic_time_and_fft;
 use std::f64::consts::PI;
 
 /// System-wide constants for the demonstration.
@@ -48,16 +48,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Displaying diagnostic plots...");
 
     // Stage 1: Message Analysis
-    plot_diagnostic_time("Original Message", &message_signal, SAMPLE_RATE);
-    plot_diagnostic_fft("Original Spectrum", &message_signal, SAMPLE_RATE, FFT_SIZE);
+    plot_diagnostic_time_and_fft("Original Message", &message_signal, SAMPLE_RATE, FFT_SIZE);
 
     // Stage 2: AM Signal Analysis
-    plot_diagnostic_time("AM Modulated Signal", &am_signal, SAMPLE_RATE);
-    plot_diagnostic_fft("AM Spectrum", &am_signal, SAMPLE_RATE, FFT_SIZE);
+    plot_diagnostic_time_and_fft("AM Modulated Signal", &am_signal, SAMPLE_RATE, FFT_SIZE);
 
     // Stage 3: Recovered Signal Analysis
-    plot_diagnostic_time("Recovered Message", &recovered_signal, SAMPLE_RATE);
-    plot_diagnostic_fft("Recovered Spectrum", &recovered_signal, SAMPLE_RATE, FFT_SIZE);
+    plot_diagnostic_time_and_fft("Recovered Message", &recovered_signal, SAMPLE_RATE, FFT_SIZE);
 
     println!("Demo complete. Standalone plots opened in browser (if diagnostic-plots feature is enabled).");
 
