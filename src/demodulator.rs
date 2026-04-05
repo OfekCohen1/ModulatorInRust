@@ -91,8 +91,27 @@ impl Demodulator for AmCoherentDetector {
         // Restore original order
         data.reverse();
 
+        // 3. Post-processing: Remove DC offset and restore scale
+        // Note: For IIR filters, we skip enough samples for the exponential 
+        // transients to decay (settling time).
+        let transient_skip = 50; 
+        let window_len = data.len().saturating_sub(2 * transient_skip);
+        
+        let mean: f64 = if window_len > 0 {
+            data.iter()
+                .skip(transient_skip)
+                .take(window_len)
+                .sum::<f64>() / window_len as f64
+        } else {
+            data.iter().sum::<f64>() / data.len() as f64
+        };
+
+        data.iter_mut().for_each(|sample| {
+            *sample = (*sample - mean) * 2.0;
+        });
+
         // --- Diagnostic: After LPF ---
-        crate::plotter::plot_diagnostic_time_and_fft("Demodulator: After LPF (Final)", &data, self.sample_rate, 2048);
+        crate::plotter::plot_diagnostic_time_and_fft("Demodulator: After LPF (Final)", &data, self.sample_rate, 2000);
 
         data
     }
@@ -160,7 +179,7 @@ mod tests {
             sample_rate,
             400,
             |t| (2.0 * PI * carrier_freq * t).cos(), 
-            |_| 0.5,
+            |_| 0.0,
         );
     }
 
@@ -176,7 +195,7 @@ mod tests {
             sample_rate,
             600,
             move |t| (1.0 + mod_index * (2.0 * PI * msg_freq * t).sin()) * (2.0 * PI * carrier_freq * t).cos(),
-            move |t| 0.5 * (1.0 + mod_index * (2.0 * PI * msg_freq * t).sin()),
+            move |t| mod_index * (2.0 * PI * msg_freq * t).sin(),
         );
     }
 

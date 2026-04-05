@@ -36,8 +36,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "Modulating with {}Hz carrier (Index: {})...",
         CARRIER_FREQUENCY, MODULATION_INDEX
     );
-    let mut am_modulator = AmModulator::new(CARRIER_FREQUENCY, MODULATION_INDEX);
-    let am_signal = am_modulator.modulate(&message_signal, SAMPLE_RATE);
+    let mut am_modulator = AmModulator::new(CARRIER_FREQUENCY, MODULATION_INDEX, SAMPLE_RATE);
+    let am_signal = am_modulator.modulate(&message_signal);
 
     // 3. Perform AM Coherent Demodulation
     println!("Demodulating signal...");

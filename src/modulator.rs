@@ -1,5 +1,5 @@
-use std::f64::consts::PI;
 use std::borrow::Cow;
+use std::f64::consts::PI;
 
 /// The common interface for all modulation techniques.
 pub trait Modulator {
@@ -7,8 +7,13 @@ pub trait Modulator {
     ///
     /// # Arguments
     /// * `message` - The input signal (message) to modulate onto the carrier.
-    /// * `sample_rate` - The system sample rate in Hz.
-    fn modulate(&mut self, message: &[f64], sample_rate: f64) -> Vec<f64>;
+    fn modulate(&mut self, message: &[f64]) -> Vec<f64>;
+}
+
+/// Supported pulse shapes for digital modulation.
+pub enum PulseShape {
+    /// A simple rectangular pulse (no shaping).
+    Rectangular,
 }
 
 /// A standard Amplitude Modulator (AM) with automatic normalization safety.
@@ -17,29 +22,34 @@ pub struct AmModulator {
     pub carrier_frequency: f64,
     /// The modulation index (0.0 to 1.0). Determines the "depth" of the modulation.
     pub modulation_index: f64,
+    /// The system sample rate in Hz.
+    pub sample_rate: f64,
 }
 
 impl AmModulator {
     /// Creates a new AM Modulator.
-    pub fn new(carrier_frequency: f64, modulation_index: f64) -> Self {
+    pub fn new(carrier_frequency: f64, modulation_index: f64, sample_rate: f64) -> Self {
         Self {
             carrier_frequency,
             modulation_index,
+            sample_rate,
         }
     }
 
     /// Internal helper to ensure the message is within the safe range [-1.0, 1.0].
-    /// 
+    ///
     /// If the signal exceeds 1.0, it is normalized to prevent overmodulation.
     /// We use Cow (Clone-on-Write) to avoid allocating memory if the signal is already safe.
     fn get_safe_message<'a>(&self, message: &'a [f64]) -> Cow<'a, [f64]> {
         // Find the peak absolute value using a functional fold.
-        let peak = message.iter().fold(0.0f64, |max_abs, &val| max_abs.max(val.abs()));
+        let peak = message
+            .iter()
+            .fold(0.0f64, |max_abs, &val| max_abs.max(val.abs()));
 
         if peak > 1.0 {
             println!("Warning: Message signal peak ({:.2}) exceeds 1.0. Normalizing to avoid overmodulation.", peak);
             let normalized: Vec<f64> = message.iter().map(|&val| val / peak).collect();
-            Cow::Owned(normalized) 
+            Cow::Owned(normalized)
         } else {
             Cow::Borrowed(message)
         }
@@ -47,9 +57,9 @@ impl AmModulator {
 }
 
 impl Modulator for AmModulator {
-    fn modulate(&mut self, message: &[f64], sample_rate: f64) -> Vec<f64> {
+    fn modulate(&mut self, message: &[f64]) -> Vec<f64> {
         let safe_message = self.get_safe_message(message);
-        let angular_frequency_per_sample = 2.0 * PI * self.carrier_frequency / sample_rate;
+        let angular_frequency_per_sample = 2.0 * PI * self.carrier_frequency / self.sample_rate;
 
         safe_message
             .iter()
@@ -57,11 +67,69 @@ impl Modulator for AmModulator {
             .map(|(i, &msg_sample)| {
                 // Generate carrier: cos(2 * PI * f * t)
                 let carrier = (angular_frequency_per_sample * i as f64).cos();
-                
+
                 // AM formula: s(t) = [1 + m * m(t)] * c(t)
                 let envelope = 1.0 + (self.modulation_index * msg_sample);
 
                 envelope * carrier
+            })
+            .collect()
+    }
+}
+
+/// A Binary Phase Shift Keying (BPSK) Modulator with pulse shaping.
+pub struct BpskModulator {
+    pub carrier_frequency: f64,
+    pub symbol_rate: f64,
+    pub sample_rate: f64,
+    pub samples_per_symbol: usize,
+    pub baseband_pulse: Vec<f64>,
+}
+
+impl BpskModulator {
+    /// Creates a new BPSK Modulator.
+    ///
+    /// Enforces that the sample rate is an integer multiple of the symbol rate.
+    pub fn new(
+        carrier_frequency: f64,
+        symbol_rate: f64,
+        sample_rate: f64,
+        shape: PulseShape,
+    ) -> Self {
+        // Requirement: Ensure sps is an integer
+        assert_eq!((sample_rate / symbol_rate).fract(), 0.0, "Sample rate ({}) must be an integer multiple of symbol rate ({})", sample_rate, symbol_rate);
+        let samples_per_symbol = (sample_rate / symbol_rate) as usize;
+
+        let baseband_pulse = match shape {
+            PulseShape::Rectangular => vec![1.0; samples_per_symbol],
+        };
+
+        Self {
+            carrier_frequency,
+            symbol_rate,
+            sample_rate,
+            samples_per_symbol,
+            baseband_pulse,
+        }
+    }
+}
+
+impl Modulator for BpskModulator {
+    fn modulate(&mut self, message: &[f64]) -> Vec<f64> {
+        let angular_freq = 2.0 * PI * self.carrier_frequency / self.sample_rate;
+
+        // Functional approach using iterators
+        message
+            .iter()
+            .flat_map(|&bit| {
+                // Map 1.0 -> 1.0 (0 phase), 0.0 -> -1.0 (180 phase)
+                let bit_val = if bit == 1.0 { 1.0 } else { -1.0 };
+                self.baseband_pulse.iter().map(move |&p| p * bit_val)
+            })
+            .enumerate()
+            .map(|(i, baseband_sample)| {
+                let carrier = (angular_freq * i as f64).cos();
+                baseband_sample * carrier
             })
             .collect()
     }
@@ -82,15 +150,13 @@ mod tests {
     #[rstest]
     fn test_am_normalization_safety(sample_rate: f64) {
         // --- Arrange ---
-        let mut am = AmModulator::new(100.0, 1.0);
-        let oversized_message = vec![2.0; 100]; // Peak is 2.0, should be normalized to 1.0
+        let mut am = AmModulator::new(100.0, 1.0, sample_rate);
+        let oversized_message = vec![2.0; 100];
 
         // --- Act ---
-        let output = am.modulate(&oversized_message, sample_rate);
+        let output = am.modulate(&oversized_message);
 
         // --- Assert ---
-        // If normalized correctly, envelope is 1 + 1.0 * (2.0/2.0) = 2.0.
-        // If NOT normalized, envelope would be 1 + 1.0 * 2.0 = 3.0.
         let angular_frequency_per_sample = 2.0 * PI * 100.0 / sample_rate;
         output.iter().enumerate().for_each(|(i, &val)| {
             let expected = 2.0 * (angular_frequency_per_sample * i as f64).cos();
@@ -104,23 +170,77 @@ mod tests {
     fn test_am_modulation_full_signal(
         #[case] carrier_frequency: f64,
         #[case] modulation_index: f64,
-        sample_rate: f64
+        sample_rate: f64,
     ) {
-        let mut am = AmModulator::new(carrier_frequency, modulation_index);
-        let message = vec![1.0; 50]; 
-        
+        // --- Arrange ---
+        let mut am = AmModulator::new(carrier_frequency, modulation_index, sample_rate);
+        let message = vec![1.0; 50];
+
         let angular_frequency_per_sample = 2.0 * PI * carrier_frequency / sample_rate;
-        let expected_signal = (0..message.len()).map(|i| {
-            (1.0 + modulation_index) * (angular_frequency_per_sample * i as f64).cos()
-        });
+        let expected_signal = (0..message.len())
+            .map(|i| (1.0 + modulation_index) * (angular_frequency_per_sample * i as f64).cos());
 
-        let output = am.modulate(&message, sample_rate);
+        // --- Act ---
+        let output = am.modulate(&message);
 
-        output.iter()
+        // --- Assert ---
+        output
+            .iter()
             .zip(expected_signal)
             .enumerate()
             .for_each(|(i, (actual, expected))| {
                 assert!((actual - expected).abs() < EPSILON, "Sample {} mismatch", i);
+            });
+    }
+
+    #[rstest]
+    fn test_bpsk_integer_sps_enforcement() {
+        // --- Arrange ---
+        // 1000 / 333 is not an integer
+
+        // --- Act ---
+        let result = std::panic::catch_unwind(|| {
+            BpskModulator::new(100.0, 333.0, 1000.0, PulseShape::Rectangular);
+        });
+
+        // --- Assert ---
+        assert!(result.is_err());
+    }
+
+    #[rstest]
+    fn test_bpsk_modulation_output(sample_rate: f64) {
+        // --- Arrange ---
+        let carrier_freq = 100.0;
+        let symbol_rate = 100.0; // 10 samples per symbol
+        let mut bpsk = BpskModulator::new(
+            carrier_freq,
+            symbol_rate,
+            sample_rate,
+            PulseShape::Rectangular,
+        );
+
+        let message = vec![1.0, 0.0];
+        let angular_freq = 2.0 * PI * carrier_freq / sample_rate;
+
+        // Generate expected result beforehand using iterators
+        let expected: Vec<f64> = (0..20)
+            .map(|i| {
+                let bit_val = if i < 10 { 1.0 } else { -1.0 };
+                bit_val * (angular_freq * i as f64).cos()
+            })
+            .collect();
+
+        // --- Act ---
+        let output = bpsk.modulate(&message);
+
+        // --- Assert ---
+        assert_eq!(output.len(), 20);
+        output
+            .iter()
+            .zip(expected.iter())
+            .enumerate()
+            .for_each(|(i, (actual, exp))| {
+                assert!((actual - exp).abs() < EPSILON, "Sample {} mismatch", i);
             });
     }
 }
