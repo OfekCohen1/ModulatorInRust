@@ -134,12 +134,12 @@ impl Modulator for BpskModulator {
         // 1. Zero-stuffing (upsampling) using pre-allocated workspace
         self.workspace_zero_stuffed[..expected_len].fill(0.0);
         
-        let m = self.baseband_pulse.len();
-        let k = (m - 1) / 2; // Same mode offset
+        let pulse_length = self.baseband_pulse.len();
+        let half_pulse_length = (pulse_length - 1) / 2; // Same mode offset
 
         message.iter().enumerate().for_each(|(i, &bit)| {
             let bit_val = if bit == 1.0 { 1.0 } else { -1.0 };
-            let pos = i * self.samples_per_symbol + k;
+            let pos = i * self.samples_per_symbol + half_pulse_length;
             if pos < expected_len {
                 self.workspace_zero_stuffed[pos] = bit_val;
             }
@@ -147,17 +147,17 @@ impl Modulator for BpskModulator {
 
         // 2. Pulse Shaping via Convolution using pre-allocated workspace
         let convolver = DirectConvolver;
-        let baseband_slice = &mut self.workspace_baseband[..expected_len];
+        let output_baseband_slice = &mut self.workspace_baseband[..expected_len];
         convolver.convolve(
             &self.workspace_zero_stuffed[..expected_len], 
             &self.baseband_pulse, 
-            baseband_slice, 
+            output_baseband_slice, 
             ConvolveMode::Same
         );
 
         // 3. Carrier Multiplication (Passband translation)
         output.iter_mut()
-            .zip(baseband_slice.iter())
+            .zip(output_baseband_slice.iter())
             .enumerate()
             .for_each(|(i, (out, &bb_sample))| {
                 let carrier = (angular_freq * i as f64).cos();
