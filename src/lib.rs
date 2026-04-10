@@ -1,3 +1,4 @@
+pub mod convolve;
 pub mod demodulator;
 pub mod modulator;
-pub mod plotter;
+pub mod signal_dumper;

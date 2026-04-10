@@ -1,6 +1,6 @@
 use modulator_in_rust::modulator::{AmModulator, Modulator};
 use modulator_in_rust::demodulator::{AmCoherentDetector, Demodulator};
-use modulator_in_rust::plotter::plot_diagnostic_time_and_fft;
+use modulator_in_rust::signal_dumper::dump_signal;
 use std::f64::consts::PI;
 
 /// System-wide constants for the demonstration.
@@ -12,11 +12,6 @@ const MODULATION_INDEX: f64 = 0.8;
 
 /// Demodulation constants
 const FILTER_CUTOFF_FREQ: f64 = 15.0;
-
-/// Visualization constants
-/// Choosing 2000 gives us a 0.5Hz resolution (1000/2000), 
-/// which aligns perfectly with our 5Hz message.
-const FFT_SIZE: usize = 2000;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Starting AM Modulation/Demodulation Demonstration...");
@@ -37,26 +32,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         CARRIER_FREQUENCY, MODULATION_INDEX
     );
     let mut am_modulator = AmModulator::new(CARRIER_FREQUENCY, MODULATION_INDEX, SAMPLE_RATE);
-    let am_signal = am_modulator.modulate(&message_signal);
+    let mut am_signal = vec![0.0; num_samples];
+    am_modulator.modulate(&message_signal, &mut am_signal);
 
     // 3. Perform AM Coherent Demodulation
     println!("Demodulating signal...");
-    let mut detector = AmCoherentDetector::new(CARRIER_FREQUENCY, FILTER_CUTOFF_FREQ, SAMPLE_RATE);
-    let recovered_signal = detector.demodulate(&am_signal);
+    let mut detector = AmCoherentDetector::new(CARRIER_FREQUENCY, MODULATION_INDEX, FILTER_CUTOFF_FREQ, SAMPLE_RATE);
+    let mut recovered_signal = vec![0.0; num_samples];
+    detector.demodulate(&am_signal, &mut recovered_signal);
 
-    // 4. Visualization (Standalone Diagnostic Plots)
-    println!("Displaying diagnostic plots...");
+    // 4. Signal Dumping (External Diagnostic Analysis)
+    println!("Dumping signals for external Python analysis...");
 
     // Stage 1: Message Analysis
-    plot_diagnostic_time_and_fft("Original Message", &message_signal, SAMPLE_RATE, FFT_SIZE);
+    dump_signal("original_message", &message_signal);
 
     // Stage 2: AM Signal Analysis
-    plot_diagnostic_time_and_fft("AM Modulated Signal", &am_signal, SAMPLE_RATE, FFT_SIZE);
+    dump_signal("am_modulated_signal", &am_signal);
 
     // Stage 3: Recovered Signal Analysis
-    plot_diagnostic_time_and_fft("Recovered Message", &recovered_signal, SAMPLE_RATE, FFT_SIZE);
+    dump_signal("recovered_message", &recovered_signal);
 
-    println!("Demo complete. Standalone plots opened in browser (if diagnostic-plots feature is enabled).");
+    println!("Demo complete. Run Python plotters in /tools/ to visualize signals.");
 
     Ok(())
 }
