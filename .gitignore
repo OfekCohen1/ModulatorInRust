@@ -1,9 +1,5 @@
 /target
 /Cargo.lock
 
-# Gemini CLI
-.gemini/
-*.skill
-
 # IDEs
 .idea/
