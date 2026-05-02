@@ -1,4 +1,5 @@
 use crate::convolve::{Convolver, DirectConvolver, ConvolveMode};
+use crate::config::{AmConfig, DigitalConfig};
 use std::borrow::Cow;
 use std::f64::consts::PI;
 
@@ -12,30 +13,15 @@ pub trait Modulator {
     fn modulate(&mut self, message: &[f64], output: &mut [f64]);
 }
 
-/// Supported pulse shapes for digital modulation.
-pub enum PulseShape {
-    /// A simple rectangular pulse (no shaping).
-    Rectangular,
-}
-
 /// A standard Amplitude Modulator (AM) with automatic normalization safety.
 pub struct AmModulator {
-    /// The frequency of the carrier sine wave in Hz.
-    pub carrier_frequency: f64,
-    /// The modulation index (0.0 to 1.0). Determines the "depth" of the modulation.
-    pub modulation_index: f64,
-    /// The system sample rate in Hz.
-    pub sample_rate: f64,
+    pub config: AmConfig,
 }
 
 impl AmModulator {
     /// Creates a new AM Modulator.
-    pub fn new(carrier_frequency: f64, modulation_index: f64, sample_rate: f64) -> Self {
-        Self {
-            carrier_frequency,
-            modulation_index,
-            sample_rate,
-        }
+    pub fn new(config: AmConfig) -> Self {
+        Self { config }
     }
 
     /// Internal helper to ensure the message is within the safe range [-1.0, 1.0].
@@ -63,14 +49,14 @@ impl Modulator for AmModulator {
         assert_eq!(message.len(), output.len(), "Message and output buffers must have the same length");
         
         let safe_message = self.get_safe_message(message);
-        let angular_frequency_per_sample = 2.0 * PI * self.carrier_frequency / self.sample_rate;
+        let angular_frequency_per_sample = 2.0 * PI * self.config.base.carrier_frequency / self.config.base.sample_rate;
 
         output.iter_mut().enumerate().zip(safe_message.iter()).for_each(|((i, out), &msg_sample)| {
             // Generate carrier: cos(2 * PI * f * t)
             let carrier = (angular_frequency_per_sample * i as f64).cos();
 
             // AM formula: s(t) = [1 + m * m(t)] * c(t)
-            let envelope = 1.0 + (self.modulation_index * msg_sample);
+            let envelope = 1.0 + (self.config.modulation_index * msg_sample);
 
             *out = envelope * carrier;
         });
@@ -79,10 +65,7 @@ impl Modulator for AmModulator {
 
 /// A Binary Phase Shift Keying (BPSK) Modulator with pulse shaping.
 pub struct BpskModulator {
-    pub carrier_frequency: f64,
-    pub symbol_rate: f64,
-    pub sample_rate: f64,
-    pub samples_per_symbol: usize,
+    pub config: DigitalConfig,
     pub baseband_pulse: Vec<f64>,
     /// Pre-allocated buffer for zero-stuffing (upsampling).
     workspace_zero_stuffed: Vec<f64>,
@@ -92,30 +75,15 @@ pub struct BpskModulator {
 
 impl BpskModulator {
     /// Creates a new BPSK Modulator.
-    ///
-    /// Enforces that the sample rate is an integer multiple of the symbol rate.
     pub fn new(
-        carrier_frequency: f64,
-        symbol_rate: f64,
-        sample_rate: f64,
-        shape: PulseShape,
+        config: DigitalConfig,
         max_message_len: usize,
     ) -> Self {
-        // Requirement: Ensure sps is an integer
-        assert_eq!((sample_rate / symbol_rate).fract(), 0.0, "Sample rate ({}) must be an integer multiple of symbol rate ({})", sample_rate, symbol_rate);
-        let samples_per_symbol = (sample_rate / symbol_rate) as usize;
-
-        let baseband_pulse = match shape {
-            PulseShape::Rectangular => vec![1.0; samples_per_symbol],
-        };
-
-        let max_samples = max_message_len * samples_per_symbol;
+        let baseband_pulse = config.pulse_shape.generate_kernel(config.base.sample_rate, config.symbol_rate);
+        let max_samples = max_message_len * config.samples_per_symbol();
 
         Self {
-            carrier_frequency,
-            symbol_rate,
-            sample_rate,
-            samples_per_symbol,
+            config,
             baseband_pulse,
             workspace_zero_stuffed: vec![0.0; max_samples],
             workspace_baseband: vec![0.0; max_samples],
@@ -125,11 +93,12 @@ impl BpskModulator {
 
 impl Modulator for BpskModulator {
     fn modulate(&mut self, message: &[f64], output: &mut [f64]) {
-        let expected_len = message.len() * self.samples_per_symbol;
+        let sps = self.config.samples_per_symbol();
+        let expected_len = message.len() * sps;
         assert_eq!(output.len(), expected_len, "Output buffer must be exactly {} samples for {} message bits", expected_len, message.len());
         assert!(expected_len <= self.workspace_zero_stuffed.len(), "Message exceeds pre-allocated workspace capacity");
 
-        let angular_freq = 2.0 * PI * self.carrier_frequency / self.sample_rate;
+        let angular_freq = 2.0 * PI * self.config.base.carrier_frequency / self.config.base.sample_rate;
 
         // 1. Zero-stuffing (upsampling) using pre-allocated workspace
         self.workspace_zero_stuffed[..expected_len].fill(0.0);
@@ -139,7 +108,7 @@ impl Modulator for BpskModulator {
 
         message.iter().enumerate().for_each(|(i, &bit)| {
             let bit_val = if bit == 1.0 { 1.0 } else { -1.0 };
-            let pos = i * self.samples_per_symbol + half_pulse_length;
+            let pos = i * sps + half_pulse_length;
             if pos < expected_len {
                 self.workspace_zero_stuffed[pos] = bit_val;
             }
@@ -169,6 +138,7 @@ impl Modulator for BpskModulator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pulse::PulseShape;
     use rstest::*;
 
     const EPSILON: f64 = 1e-10;
@@ -181,7 +151,8 @@ mod tests {
     #[rstest]
     fn test_am_normalization_safety(sample_rate: f64) {
         // --- Arrange ---
-        let mut am = AmModulator::new(100.0, 1.0, sample_rate);
+        let config = AmConfig::new(100.0, sample_rate, 1.0);
+        let mut am = AmModulator::new(config);
         let oversized_message = vec![2.0; 100];
         let mut output = vec![0.0; 100];
 
@@ -205,7 +176,8 @@ mod tests {
         sample_rate: f64,
     ) {
         // --- Arrange ---
-        let mut am = AmModulator::new(carrier_frequency, modulation_index, sample_rate);
+        let config = AmConfig::new(carrier_frequency, sample_rate, modulation_index);
+        let mut am = AmModulator::new(config);
         let message = vec![1.0; 50];
         let mut output = vec![0.0; 50];
 
@@ -233,7 +205,8 @@ mod tests {
 
         // --- Act ---
         let result = std::panic::catch_unwind(|| {
-            BpskModulator::new(100.0, 333.0, 1000.0, PulseShape::Rectangular, 10);
+            let config = DigitalConfig::new(100.0, 333.0, 1000.0, PulseShape::Rectangular);
+            BpskModulator::new(config, 10);
         });
 
         // --- Assert ---
@@ -245,13 +218,8 @@ mod tests {
         // --- Arrange ---
         let carrier_freq = 100.0;
         let symbol_rate = 100.0; // 10 samples per symbol
-        let mut bpsk = BpskModulator::new(
-            carrier_freq,
-            symbol_rate,
-            sample_rate,
-            PulseShape::Rectangular,
-            2,
-        );
+        let config = DigitalConfig::new(carrier_freq, symbol_rate, sample_rate, PulseShape::Rectangular);
+        let mut bpsk = BpskModulator::new(config, 2);
 
         let message = vec![1.0, 0.0];
         let mut output = vec![0.0; 20];

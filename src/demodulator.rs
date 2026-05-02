@@ -3,6 +3,7 @@
 use std::f64::consts::PI;
 use biquad::{ToHertz, Coefficients, DirectForm2Transposed, Type, Q_BUTTERWORTH_F64, Biquad};
 use crate::signal_dumper::dump_signal;
+use crate::config::DigitalConfig;
 
 /// The common interface for all demodulation techniques.
 pub trait Demodulator {
@@ -12,6 +13,67 @@ pub trait Demodulator {
     /// * `signal` - The modulated signal to process.
     /// * `output` - The pre-allocated buffer to store the recovered message.
     fn demodulate(&mut self, signal: &[f64], output: &mut [f64]);
+}
+
+/// A trait for mapping baseband samples to digital symbols (bits).
+///
+/// This allows the DigitalDemodulator to be generic over different 
+/// modulation schemes (BPSK, QPSK, QAM).
+pub trait SymbolSlicer {
+    /// Maps a single baseband sample to a bit value (e.g., 0.0 or 1.0).
+    fn slice(&self, sample: f64) -> f64;
+}
+
+/// A simple zero-threshold slicer for BPSK signals.
+#[derive(Default, Clone, Copy, Debug, PartialEq)]
+pub struct BpskSlicer;
+
+impl SymbolSlicer for BpskSlicer {
+    fn slice(&self, sample: f64) -> f64 {
+        todo!("Implement zero-threshold slicing logic")
+    }
+}
+
+/// A generic digital demodulator pipeline.
+///
+/// Orchestrates mixing, filtering (LPF + Matched Filter), and slicing.
+/// Uses pre-allocated workspaces to satisfy the zero-copy mandate.
+pub struct DigitalDemodulator<Slicer: SymbolSlicer> {
+    pub config: DigitalConfig,
+    /// Pre-calculated Matched Filter / LPF kernel.
+    pub filter_kernel: Vec<f64>,
+    /// Decision logic for mapping samples to bits.
+    pub slicer: Slicer,
+    /// Pre-allocated workspace for the downconverted (mixed) signal.
+    workspace_after_mixer: Vec<f64>,
+    /// Pre-allocated workspace for the filtered baseband signal.
+    workspace_signal_after_filter: Vec<f64>,
+}
+
+impl<S: SymbolSlicer> DigitalDemodulator<S> {
+    /// Creates a new DigitalDemodulator with pre-allocated workspaces.
+    pub fn new(
+        config: DigitalConfig,
+        slicer: S,
+        max_samples: usize,
+    ) -> Self {
+        let filter_kernel = config.pulse_shape.generate_kernel(config.base.sample_rate, config.symbol_rate);
+        
+        todo!("Initialize workspaces and pre-calculate any LO constants")
+    }
+}
+
+impl<S: SymbolSlicer> Demodulator for DigitalDemodulator<S> {
+    fn demodulate(&mut self, signal: &[f64], output: &mut [f64]) {
+        // Step 1: Downconversion (Mixing with LO)
+        // todo!("Implement carrier removal into workspace_mixed");
+
+        // Step 2: Filtering (Combined LPF and Matched Filter)
+        // todo!("Perform convolution using DirectConvolver into workspace_filtered");
+
+        // Step 3: Slicing (Decision logic at symbol centers)
+        todo!("Implement full pipeline logic and slicing into output buffer")
+    }
 }
 
 /// A Coherent AM Detector with Zero-Phase filtering.
@@ -130,6 +192,23 @@ mod tests {
     #[fixture]
     fn sample_rate() -> f64 {
         1000.0
+    }
+
+    #[rstest]
+    #[case(1.2, 1.0)]
+    #[case(-0.5, 0.0)]
+    #[case(0.1, 1.0)]
+    #[case(-2.0, 0.0)]
+    #[case(0.0, 0.0)]
+    fn test_bpsk_slicer_hard_decision(#[case] input: f64, #[case] expected: f64) {
+        // --- Arrange ---
+        let slicer = BpskSlicer;
+
+        // --- Act ---
+        let actual = slicer.slice(input);
+
+        // --- Assert ---
+        assert_eq!(actual, expected);
     }
 
     /// A generic test runner for demodulation scenarios.

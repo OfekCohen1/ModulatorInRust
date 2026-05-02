@@ -31,7 +31,9 @@ To isolate the baseband signal and suppress the $2f_c$ term, a Finite Impulse Re
 
 - **Filter Type:** Windowed Sinc.
 - **Window Function:** Hamming window ($w(n) = 0.54 - 0.46 \cos(2\pi n / M)$).
+  - *Theoretical Note:* The coefficients $\alpha = 0.54$ and $\beta = 0.46$ are chosen to minimize the peak side-lobe level (achieving approx. -43 dB suppression), which is superior to the Hann window for stopping leaked carrier components.
 - **Cutoff Frequency ($f_{cutoff}$):** $2 \cdot R_s$, where $R_s$ is the symbol rate.
+  - *Theoretical Note:* For rectangular pulses (which have a $sinc$ spectrum), the main lobe spans $2 \cdot R_s$. A cutoff of $2 \cdot R_s$ captures this main lobe and the first side-lobes, preserving the pulse shape. If using Root-Raised Cosine (RRC) pulses, this could be reduced closer to $R_s$.
 - **Impulse Response ($h(n)$):**
   $$h_{ideal}(n) = 2 f_{norm} \cdot \text{sinc}(2 f_{norm} (n - M/2))$$
   $$h(n) = h_{ideal}(n) \cdot w(n)$$

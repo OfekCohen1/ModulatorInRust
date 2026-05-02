@@ -1,6 +1,7 @@
 use modulator_in_rust::modulator::{AmModulator, Modulator};
 use modulator_in_rust::demodulator::{AmCoherentDetector, Demodulator};
 use modulator_in_rust::signal_dumper::dump_signal;
+use modulator_in_rust::config::AmConfig;
 use std::f64::consts::PI;
 
 /// System-wide constants for the demonstration.
@@ -31,7 +32,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "Modulating with {}Hz carrier (Index: {})...",
         CARRIER_FREQUENCY, MODULATION_INDEX
     );
-    let mut am_modulator = AmModulator::new(CARRIER_FREQUENCY, MODULATION_INDEX, SAMPLE_RATE);
+    let am_config = AmConfig::new(CARRIER_FREQUENCY, SAMPLE_RATE, MODULATION_INDEX);
+    let mut am_modulator = AmModulator::new(am_config);
     let mut am_signal = vec![0.0; num_samples];
     am_modulator.modulate(&message_signal, &mut am_signal);
 
